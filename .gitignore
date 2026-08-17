@@ -1,0 +1,68 @@
+# ---- IDEs / editors ----
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+!.vscode/extensions.json
+*.code-workspace
+.fleet/
+nbproject/
+.buildpath
+.project
+.settings/
+*.sublime-project
+*.sublime-workspace
+.history/
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+# ---- OS cruft ----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---- Composer / PHP ----
+/vendor/
+composer.phar
+.php-cs-fixer.cache
+.php-cs-fixer.php
+.phpunit.result.cache
+.phpunit.cache/
+/phpunit.xml
+/.phpcs-cache
+/.phpstan.cache
+/.psalm/
+phpstan.neon
+!phpstan.neon.dist
+/build/
+/coverage/
+*.log
+
+# ---- Environment / local config ----
+.env
+.env.*
+!.env.example
+config.local.php
+*.local.php
+
+# ---- Runtime data & caches ----
+/data/
+/cache/
+/tmp/
+/logs/
+/sessions/
+
+# ---- eMule HTTP Cache local state ----
+/config.php
+/storage/
+/var/

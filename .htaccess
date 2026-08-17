@@ -1,0 +1,30 @@
+########################################################################
+# eMule HTTP Cache — Apache front-controller routing
+#
+# Requires mod_rewrite and "AllowOverride All" (or at least FileInfo)
+# on the containing directory.
+########################################################################
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # CGI/FastCGI strips the Authorization header before PHP sees it.
+    # Re-expose it as HTTP_AUTHORIZATION so Auth::identify() can read the
+    # Bearer token. Harmless under mod_php, required under php-fpm.
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Everything that is not a real file or directory goes to the router.
+    # No RewriteBase: the router derives its own base from SCRIPT_NAME, so
+    # this works no matter which subdirectory the app is deployed into.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
+
+# No directory listings anywhere in the tree.
+Options -Indexes
+
+# NOTE: this app needs post_max_size >= ~10M to accept a 9,728,016-byte
+# chunk. Setting php_value here would 500 under php-fpm, so it is left to
+# php.ini deliberately. See README.md ("Requirements").
