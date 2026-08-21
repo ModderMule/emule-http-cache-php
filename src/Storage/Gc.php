@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace EMule\HttpCache;
+namespace EMule\HttpCache\Storage;
+
+use EMule\HttpCache\Config;
 
 /**
  * Expiry sweep.

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace EMule\HttpCache;
+namespace EMule\HttpCache\Http;
 
 /**
  * A single parsed byte range, per RFC 9110 §14.

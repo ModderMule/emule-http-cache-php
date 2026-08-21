@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace EMule\HttpCache;
+namespace EMule\HttpCache\Security;
+
+use EMule\HttpCache\Config;
 
 /**
  * API-key authentication for the write endpoints.

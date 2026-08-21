@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace EMule\HttpCache;
 
+use EMule\HttpCache\Http\Response;
+use EMule\HttpCache\Http\Router;
+
 /**
  * eMule HTTP Cache — front controller.
  *

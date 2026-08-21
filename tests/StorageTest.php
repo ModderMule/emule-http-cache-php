@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace EMule\HttpCache\Tests;
 
 use EMule\HttpCache\Config;
-use EMule\HttpCache\Gc;
-use EMule\HttpCache\Store;
+use EMule\HttpCache\Storage\Gc;
+use EMule\HttpCache\Storage\Store;
 
 /**
  * Local-only tests for the parts of the storage layer HTTP cannot reach.

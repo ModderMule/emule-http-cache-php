@@ -2,7 +2,13 @@
 
 declare(strict_types=1);
 
-namespace EMule\HttpCache;
+namespace EMule\HttpCache\Http;
+
+use EMule\HttpCache\Config;
+use EMule\HttpCache\Security\Auth;
+use EMule\HttpCache\Storage\Gc;
+use EMule\HttpCache\Storage\Quota;
+use EMule\HttpCache\Storage\Store;
 
 /**
  * Front controller.

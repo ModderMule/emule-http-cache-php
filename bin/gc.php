@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace EMule\HttpCache;
 
+use EMule\HttpCache\Storage\Gc;
+use EMule\HttpCache\Storage\Store;
+
 /**
  * CLI expiry sweep.
  *
@@ -11,8 +14,7 @@ namespace EMule\HttpCache;
  *
  * Suitable for cron. Hourly suits TTLs measured in days, and an off-the-hour
  * minute keeps it clear of everything else scheduled at :00:
- *   17 * * * * /Applications/XAMPP/xamppfiles/bin/php \
- *       /Applications/XAMPP/xamppfiles/htdocs/emule-http-cache-php/bin/gc.php >/dev/null 2>&1
+ *   17 * * * * /usr/bin/php /path/to/emule-http-cache-php/bin/gc.php >/dev/null 2>&1
  *
  * That reclaims up to 200 items an hour; raise maxDeletes on an install that
  * expires more than 4,800 chunks a day, or the backlog only grows.
@@ -21,8 +23,8 @@ namespace EMule\HttpCache;
  * paying for cleanup. The server's own daily trigger stays on regardless, but it
  * only fires when an upload arrives — this is the one that runs on a schedule.
  *
- * Run it as the web server user (sudo -u daemon under XAMPP), or every unlink
- * fails on shard directories Apache owns and the reclaim count is a silent zero.
+ * Run it as the web server user (sudo -u daemon, sudo -u www-data), or every
+ * unlink fails on shard directories Apache owns and the count is a silent zero.
  */
 
 if (PHP_SAPI !== 'cli') {

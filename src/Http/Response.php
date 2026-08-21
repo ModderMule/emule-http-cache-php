@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace EMule\HttpCache;
+namespace EMule\HttpCache\Http;
 
 /**
  * Response helpers.

@@ -1,0 +1,130 @@
+########################################################################
+# eMule HTTP Cache — minimal nginx vhost
+#
+# Copy into /etc/nginx/sites-available/, adjust server_name, root and
+# fastcgi_pass, enable it and reload. Everything below that is not
+# boilerplate carries the reason for it on the line above.
+#
+# nginx does not read .htaccess, so the protection that storage/,
+# var/ and tests/ get from their own .htaccess files under Apache has
+# to be restated here.
+########################################################################
+
+server {
+    listen 80;
+    server_name cache.example.com;
+
+    root /path/to/emule-http-cache-php;
+
+    # A padded eMule part is 9,728,016 bytes and nginx defaults to 1m,
+    # so without this every upload is a 413 before PHP sees the body.
+    # Keep it at or below php-fpm's post_max_size, which needs >= 10M.
+    client_max_body_size 12m;
+
+    # Without this, "/" resolves to the directory, finds no index.html
+    # and answers 403 instead of the status page.
+    index index.php;
+
+    # One entry point. Chunks are served by PHP, never off the disk.
+    location / {
+        try_files $uri $uri/ /index.php$is_args$args;
+    }
+
+    location = /index.php {
+        include fastcgi_params;
+        fastcgi_pass unix:/run/php/php-fpm.sock;
+
+        # Not in Debian's fastcgi_params; without it php-fpm has no
+        # script to run and answers "No input file specified".
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+
+        # nginx forwards request headers to FPM by default, so this is
+        # belt and braces — it keeps Auth::identify() working even if an
+        # included snippet sets fastcgi_pass_request_headers off.
+        fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+
+        # Stream the upload straight into php://input instead of
+        # spooling all 9.28 MB to a temp file first: Store reads it in
+        # 1 MiB slices precisely so it never holds a whole chunk.
+        fastcgi_request_buffering off;
+
+        # Same on the way out, so a Range response starts moving at once
+        # rather than being buffered whole.
+        fastcgi_buffering off;
+    }
+
+    # Ciphertext, sidecars, quota counters and the CLI tools are never
+    # web-reachable. This is the .htaccess replacement.
+    location ~ ^/(storage|var|tests|bin)/ {
+        return 404;
+    }
+
+    # Only index.php runs. This also stops config.php — which holds the
+    # API secrets — being served as plain text should the PHP handler
+    # ever go missing.
+    location ~ \.php$ {
+        return 404;
+    }
+
+    # .htaccess, .git/, and the .tmp-* files of an interrupted upload.
+    # The lookahead keeps /.well-known/ reachable for ACME.
+    location ~ /\.(?!well-known) {
+        return 404;
+    }
+}
+
+# ---------------------------------------------------------------------
+# Behind TLS termination
+# ---------------------------------------------------------------------
+# Router::publicBaseUrl() builds the "url" field of a 201 from $_SERVER
+# HTTPS and Host. Behind a proxy that terminates TLS or rewrites Host,
+# pin it instead or peers are handed URLs on the wrong scheme:
+#
+#   'publicBaseUrl' => 'https://cache.example.com',   // in config.php
+
+# ---------------------------------------------------------------------
+# Keeping chunk ids out of the access log
+# ---------------------------------------------------------------------
+# A chunk URL is a bearer token: the 128-bit id is the only thing
+# guarding the ciphertext, and the default "combined" format writes it
+# to access.log on every download. To log the endpoint without the id,
+# add these to the http { } block:
+#
+#   map $request_uri $scrubbed_uri {
+#       "~^(?<endpoint>/v1/chunks/)[0-9a-f]{32}"   "${endpoint}<id>";
+#       default                                    $request_uri;
+#   }
+#
+#   log_format no_ids '$remote_addr - [$time_local] '
+#                     '"$request_method $scrubbed_uri $server_protocol" '
+#                     '$status $body_bytes_sent';
+#
+# and then, in the server block above:
+#
+#   access_log /var/log/nginx/emule-cache.log no_ids;
+
+# ---------------------------------------------------------------------
+# Deploying into a subdirectory of an existing vhost
+# ---------------------------------------------------------------------
+# Router::scriptDir() derives the base path from SCRIPT_NAME, so the app
+# needs no configuring either way. Use these in the existing server { }
+# block instead of the vhost above:
+#
+#   location /emule-http-cache-php/ {
+#       index index.php;
+#       try_files $uri $uri/ /emule-http-cache-php/index.php$is_args$args;
+#   }
+#
+#   location = /emule-http-cache-php/index.php {
+#       include fastcgi_params;
+#       fastcgi_pass unix:/run/php/php-fpm.sock;
+#       fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+#       fastcgi_param HTTP_AUTHORIZATION $http_authorization;
+#       fastcgi_request_buffering off;
+#       fastcgi_buffering off;
+#       client_max_body_size 12m;
+#   }
+#
+#   location ~ ^/emule-http-cache-php/(storage|var|tests|bin)/ {
+#       return 404;
+#   }

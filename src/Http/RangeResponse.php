@@ -2,7 +2,10 @@
 
 declare(strict_types=1);
 
-namespace EMule\HttpCache;
+namespace EMule\HttpCache\Http;
+
+use EMule\HttpCache\Storage\ChunkMeta;
+use EMule\HttpCache\Storage\Store;
 
 /**
  * RFC 9110 §14 byte-range serving for stored chunks.

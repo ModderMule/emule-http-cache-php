@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace EMule\HttpCache;
 
+use EMule\HttpCache\Security\ApiKey;
+
 /**
  * Immutable server configuration, loaded from config.php.
  *
