@@ -38,10 +38,15 @@ return [
     // leaves room without inviting arbitrary blobs.
     'maxChunkSize' => 10_485_760,
 
+    // Refuse uploads once free disk space on the storage volume would drop below
+    // this. 0 = no floor. Complements quotaBytesPerDay: that limits one key per
+    // day, this protects the host from every key at once.
+    'minFreeBytes' => 1_073_741_824,   // 1 GiB
+
     // TTL applied when the client sends no X-Chunk-TTL, and the ceiling any
     // requested TTL is clamped to.
-    'defaultTtl' => 21_600,   // 6 hours
-    'maxTtl' => 86_400,       // 24 hours
+    'defaultTtl' => 172_800,   // 48 hours
+    'maxTtl' => 604_800,       // 1 week
 
     // Absolute base URL handed back in the "url" field of a 201. Leave null to
     // derive it from the request; pin it when behind a reverse proxy that

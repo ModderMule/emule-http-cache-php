@@ -20,6 +20,8 @@ class Config
         public readonly string $varDir,
         public readonly array $apiKeys,
         public readonly int $maxChunkSize,
+        /** Free-space floor on the storage volume; 0 disables the check. */
+        public readonly int $minFreeBytes,
         public readonly int $defaultTtl,
         public readonly int $maxTtl,
         public readonly ?string $publicBaseUrl,
@@ -67,8 +69,10 @@ class Config
             varDir: $varDir,
             apiKeys: $keys,
             maxChunkSize: (int) ($raw['maxChunkSize'] ?? 10_485_760),
-            defaultTtl: (int) ($raw['defaultTtl'] ?? 21_600),
-            maxTtl: (int) ($raw['maxTtl'] ?? 86_400),
+            // A config predating this key means no floor, not a floor of zero bytes.
+            minFreeBytes: max(0, (int) ($raw['minFreeBytes'] ?? 0)),
+            defaultTtl: (int) ($raw['defaultTtl'] ?? 172_800),
+            maxTtl: (int) ($raw['maxTtl'] ?? 604_800),
             publicBaseUrl: $publicBaseUrl,
             gcProbability: (float) ($raw['gcProbability'] ?? 0.01),
         );

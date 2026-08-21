@@ -12,6 +12,7 @@
 - never remove ToDo comments unless fully implemented
 - don't use `git commit` and `git add` unless explicitly instructed
 - be short and concise in your comments. Prefer typed variables and parameters over `@var` and `@param` annotations.
+- use `declare(strict_types=1);` in applicable `.php` files
 
 ## JavaScript & TypeScript coding standards
 - for TypeScript code indentation use tabs with tab size 4

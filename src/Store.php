@@ -70,6 +70,27 @@ class Store extends StorageArea
     }
 
     /**
+     * True when writing $bytes more would still leave Config::$minFreeBytes free.
+     *
+     * Fails open when disk_free_space() cannot answer — open_basedir and some
+     * container runtimes block it, and a host like that must keep accepting
+     * uploads rather than refuse every single one.
+     */
+    public function hasRoomFor(int $bytes): bool
+    {
+        if ($this->config->minFreeBytes <= 0) {
+            return true;
+        }
+
+        $free = @disk_free_space($this->config->storageDir);
+        if ($free === false) {
+            return true;
+        }
+
+        return ($free - $bytes) >= $this->config->minFreeBytes;
+    }
+
+    /**
      * Stream the request body into the store.
      *
      * Reads php://input in slices, hashing as it goes, so peak memory stays at
@@ -171,6 +192,13 @@ class Store extends StorageArea
         }
 
         return IngestResult::committed($meta);
+    }
+
+    /** True while the blob or its sidecar is still on disk, expired or not. */
+    public function exists(string $id): bool
+    {
+        return self::isValidId($id)
+            && (is_file($this->blobPath($id)) || is_file($this->metaPath($id)));
     }
 
     /** Remove a chunk and its sidecar. False when it was not there, or would not go. */

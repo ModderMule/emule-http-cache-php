@@ -67,8 +67,8 @@ No auth. Lets a client discover limits before it wastes an upload.
   "version": 1,
   "implementation": "php",
   "maxChunkSize": 10485760,
-  "defaultTtl": 21600,
-  "maxTtl": 86400,
+  "defaultTtl": 172800,
+  "maxTtl": 604800,
   "rangeSupported": true
 }
 ```
@@ -105,7 +105,8 @@ because a backend is free to serve blobs from a different host or a signed CDN U
 header carries the same value.
 
 Errors: `400` empty body or length mismatch · `401` bad/missing key · `411` no `Content-Length` ·
-`413` over `maxChunkSize` · `429` daily quota exhausted · `507` storage failure.
+`413` over `maxChunkSize` · `429` daily quota exhausted · `507` storage failure, which covers
+both a write that failed and free space that would drop below `minFreeBytes`.
 
 ### `GET /v1/chunks/{id}`
 
@@ -126,6 +127,11 @@ IV. Without `206` it would have to restart a 9.28 MB transfer.
 `Authorization: Bearer <apiKey>`, and only the uploader's key works. `204` on success. A chunk
 belonging to another key reports `404`, not `403`, so a valid key cannot be used to probe the id
 space.
+
+Errors: `401` bad/missing key · `404` unknown, expired, or already deleted · `500` the chunk could
+not be removed and is still on disk. A `204` is a guarantee that the chunk is gone; a backend that
+cannot remove it — an unwritable storage directory is the usual cause — must say so rather than let
+the client believe a still-downloadable chunk was deleted.
 
 eMuleQt does **not** call this automatically — a failed download is as likely to be the downloader's
 or the network's fault as the blob's, so entries are left to lapse at their TTL. It exists for
@@ -148,7 +154,10 @@ Consequences a backend operator should know:
 - **Do not log request bodies**, and prefer not to log full URLs — a URL is a bearer token.
 - Chunks are immutable and short-lived. There is no update verb.
 - Uniform 9,728,016-byte blobs are the norm; anything else is a short tail part or an abuse attempt.
-- Quotas are the only defence against a key being used as free storage. Set `quotaBytesPerDay`.
+- Two settings keep a key from being used as free storage, and they are not interchangeable.
+  `quotaBytesPerDay` is fairness: it caps one key for one UTC day, so N keys can still fill the
+  volume between them. `minFreeBytes` is host protection: uploads are refused with `507` once free
+  space on the storage volume would drop below it, whoever is asking. Set both.
 
 ## Storage layout
 
@@ -156,6 +165,7 @@ Consequences a backend operator should know:
 storage/<first 2 hex of id>/<id>.bin     ciphertext
 storage/<first 2 hex of id>/<id>.json    {id,size,sha256,ownerKeyId,createdAt,expiresAt}
 var/quota-<keyId>-<YYYYMMDD>.txt         bytes charged today
+var/gc-last.txt                          unix time the last expiry sweep started
 ```
 
 Uploads land in `.tmp-<id>` and are `rename()`d into place, so a reader can never observe a partial
@@ -164,17 +174,47 @@ chunk. Nothing is buffered whole: ingest reads `php://input` in 1 MiB slices, de
 
 ## Expiry
 
-Reads never delete — a `GET` must not do write work. Two triggers reclaim expired chunks:
+Reads never delete — a `GET` must not do write work. Three triggers reclaim expired chunks, the
+first two checked at the top of every authenticated `POST /v1/chunks`, before the request is
+accepted or refused:
 
-- probabilistically after a successful upload (`gcProbability`, default 1%);
-- `php bin/gc.php [maxDeletes]`, for cron.
+- **a day since the last sweep**, recorded in `var/gc-last.txt`. This is the floor, and the reason
+  it is checked on *every* upload attempt rather than only successful ones: a server refusing
+  uploads because it is out of space must still be able to reclaim the space that would let them
+  through. Claimed under a non-blocking `flock`, so concurrent requests produce one sweep, not many;
+- **probabilistically**, on the same check (`gcProbability`, default 1%), which keeps a busy install
+  tidy in between;
+- **`php bin/gc.php [maxDeletes]`**, for cron.
 
-With cron in place set `'gcProbability' => 0.0` so uploads stop paying for cleanup.
+The first two are request-driven and have no clock of their own — "daily" means "on the first upload
+attempt after the day has lapsed", so an install nobody uploads to sweeps nothing. **Cron is the
+only real guarantee.** With cron in place set `'gcProbability' => 0.0` so uploads stop paying for
+cleanup; the daily floor stays on regardless and costs one small file read per attempt.
+
+Run `bin/gc.php` **as the web server user** — `sudo -u daemon php bin/gc.php` under XAMPP. `unlink(2)`
+needs write permission on the *containing* directory, and Apache creates `storage/<shard>/` as its
+own user, so a sweep from an ordinary shell walks the whole store, fails every unlink and prints
+`reclaimed 0` while looking like a clean no-op. `storage/` being world-writable does not help; the
+shard directory's mode is what governs. The command reports when the previous sweep ran, so a
+stalled schedule is visible:
+
+```
+last sweep: 2026-08-18T04:11:07Z (6.2 h ago)
+reclaimed 3 expired item(s)
+```
 
 ```cron
-*/15 * * * * /Applications/XAMPP/xamppfiles/bin/php \
+# sudo crontab -u daemon -e      — the web server user, per the warning above
+17 * * * * /Applications/XAMPP/xamppfiles/bin/php \
     /Applications/XAMPP/xamppfiles/htdocs/emule-http-cache-php/bin/gc.php >/dev/null 2>&1
 ```
+
+Hourly is the right cadence for TTLs measured in days. An expired chunk lingers at most an hour past
+its `expiresAt`, and it is unreachable from the moment it expires — `Store::meta()` reports it absent
+and `GET` answers `404` — so the lag costs disk, never correctness. Minute 17 rather than 0 keeps the
+sweep out of the top-of-hour crowd. Mind the budget: `bin/gc.php` removes at most 200 items per run
+by default, so hourly reclaims 4,800 a day; an install that expires more than that builds a backlog
+and wants a larger argument (`… /bin/gc.php 1000`).
 
 The sweep also reaps `.tmp-*` files older than an hour (interrupted uploads) and quota counters
 older than a week.
@@ -205,6 +245,18 @@ The `post_max_size` override is not optional — a chunk is 9,728,016 bytes and 
 silently discards a body that size. Passing `index.php` as the router script keeps `storage/`
 unreachable, exactly as `.htaccess` does under Apache.
 
+### Local tests
+
+```sh
+php tests/unit.php
+```
+
+16 assertions over the things a portable HTTP suite cannot reach, because they are driven by
+server-side config a client has no way to set: the `minFreeBytes` floor, the `Config::load()`
+fallbacks, and the daily sweep trigger. It builds throwaway app directories under the system temp
+dir, so it has to run on the machine hosting the code and is **not** part of the contract a non-PHP
+backend must satisfy. `smoke.php` remains the conformance suite.
+
 ## Files
 
 | Path | Role |
@@ -226,6 +278,8 @@ unreachable, exactly as `.htaccess` does under Apache.
 | `src/Autoloader.php` | the Composer replacement |
 | `bin/gc.php` | CLI sweep for cron |
 | `tests/smoke.php` | executable specification — run this |
+| `tests/unit.php` | local-only suite, for what HTTP cannot reach |
+| `tests/StorageTest.php` | free-space floor, config fallbacks, sweep schedule |
 | `tests/SmokeTest.php` | the 31 assertions |
 | `tests/TestCase.php` | assertion harness, inherited by future tests |
 | `tests/HttpClient.php` | ext-curl wrapper with exact header control |

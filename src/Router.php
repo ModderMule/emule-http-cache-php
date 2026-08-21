@@ -128,6 +128,11 @@ class Router
             return;
         }
 
+        // Every authenticated attempt, not just the ones that succeed: a server
+        // refusing uploads for want of space must still reclaim, and whatever
+        // this frees counts toward the room check below.
+        $this->gc->maybeSweep();
+
         $declared = $this->contentLength();
         if ($declared === null) {
             Response::error(411, 'Content-Length required');
@@ -137,6 +142,16 @@ class Router
 
         if ($declared > $this->config->maxChunkSize) {
             Response::error(413, 'chunk exceeds maxChunkSize');
+
+            return;
+        }
+
+        // Refuse before the volume fills rather than after. Measured against the
+        // declared length, so the floor holds for the largest body this request
+        // could deliver, and checked before the quota so a refusal costs the key
+        // nothing.
+        if (!$this->store->hasRoomFor($declared)) {
+            Response::error(507, 'insufficient storage');
 
             return;
         }
@@ -158,8 +173,6 @@ class Router
 
             return;
         }
-
-        $this->gc->maybeSweep();
 
         $meta = $result->meta;
         $url = $this->publicBaseUrl() . '/v1/chunks/' . $meta->id;
@@ -203,7 +216,17 @@ class Router
             return;
         }
 
-        $this->store->delete($id);
+        // A delete that did not happen must not be reported as done. An
+        // unwritable shard directory would otherwise leave the client believing
+        // the chunk is gone while it stays downloadable until its TTL lapses.
+        // A concurrent DELETE that got there first is still a success — the
+        // caller asked for the chunk to be gone, and it is.
+        if (!$this->store->delete($id) && $this->store->exists($id)) {
+            Response::error(500, 'chunk could not be removed');
+
+            return;
+        }
+
         Response::noContent();
     }
 
