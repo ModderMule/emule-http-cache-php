@@ -25,15 +25,30 @@ class Auth
 
         // Compare against every configured key with a constant-time compare, and
         // do not break early: the number of comparisons must not depend on which
-        // key matched.
+        // key matched. The enabled test sits after hash_equals for the same
+        // reason — a revoked key must cost exactly what a live one costs.
         $match = null;
         foreach ($config->apiKeys as $keyId => $key) {
-            if (hash_equals($key->secret, $presented)) {
+            if (hash_equals($key->secret, $presented) && $key->enabled) {
                 $match = (string) $keyId;
             }
         }
 
         return $match;
+    }
+
+    /**
+     * Whether the request offered a credential at all, right or wrong.
+     *
+     * identify() flattens "absent" and "wrong" to null, and an open server has
+     * to tell them apart: an absent key is an anonymous upload, a wrong one is
+     * still a 401.
+     */
+    public static function hasCredential(): bool
+    {
+        $presented = self::presentedSecret();
+
+        return $presented !== null && $presented !== '';
     }
 
     // -- internals ------------------------------------------------------------

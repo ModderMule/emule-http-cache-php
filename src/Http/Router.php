@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace EMule\HttpCache\Http;
 
 use EMule\HttpCache\Config;
+use EMule\HttpCache\Install\InstallController;
+use EMule\HttpCache\Install\Installer;
 use EMule\HttpCache\Security\Auth;
 use EMule\HttpCache\Storage\Gc;
 use EMule\HttpCache\Storage\Quota;
@@ -14,11 +16,13 @@ use EMule\HttpCache\Storage\Store;
  * Front controller.
  *
  * The routing table is the whole API surface — see README.md for the contract a
- * non-PHP backend has to reproduce.
+ * non-PHP backend has to reproduce. /install is the exception: it is this
+ * implementation's own setup page and no other backend needs it.
  *
  *   GET    /                      status page
+ *   GET    /install               setup page, once installed only says so
  *   GET    /v1/info               server limits (no auth)
- *   POST   /v1/chunks             store a chunk (auth)
+ *   POST   /v1/chunks             store a chunk (auth, unless openUpload)
  *   GET    /v1/chunks/{id}        fetch a chunk, Range-capable (no auth)
  *   HEAD   /v1/chunks/{id}        as GET, headers only (no auth)
  *   DELETE /v1/chunks/{id}        drop a chunk (auth, owner only)
@@ -38,11 +42,17 @@ class Router
 
     public function dispatch(): void
     {
-        $method = mb_strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
-        $path = $this->requestPath();
+        $method = Request::method();
+        $path = Request::path();
 
         if ($path === '' || $path === '/') {
             $this->handleRoot($method);
+
+            return;
+        }
+
+        if ($path === '/install') {
+            (new InstallController(new Installer($this->config->baseDir)))->handle($method, $path);
 
             return;
         }
@@ -83,35 +93,29 @@ class Router
             return;
         }
 
-        Response::status(200);
-        header('Content-Type: text/html; charset=utf-8');
-        header('Cache-Control: no-store');
-
         if ($method === 'HEAD') {
+            HtmlPage::headers(200);
+
             return;
         }
 
-        $base = htmlspecialchars($this->publicBaseUrl(), ENT_QUOTES, 'UTF-8');
-        echo <<<HTML
-        <!doctype html>
-        <meta charset="utf-8">
-        <title>eMule HTTP Cache</title>
-        <style>
-          body{font:14px/1.6 -apple-system,system-ui,sans-serif;max-width:46rem;margin:3rem auto;padding:0 1rem}
-          code{background:#f4f4f5;padding:.1rem .35rem;border-radius:3px}
-          td{padding:.15rem .75rem .15rem 0;vertical-align:top}
-        </style>
-        <h1>eMule HTTP Cache</h1>
+        $base = HtmlPage::escape($this->publicBaseUrl());
+        $auth = $this->config->openUpload
+            ? '<p>Uploads are open: no API key is needed to store a chunk here.</p>'
+            : '';
+
+        HtmlPage::send(200, 'Status', <<<HTML
         <p>Encrypted chunk cache for eMuleQt. This server stores AES-256-CBC ciphertext
         and never receives a key, a file hash or a part number.</p>
         <table>
           <tr><td><code>GET</code></td><td><a href="{$base}/v1/info">{$base}/v1/info</a></td></tr>
-          <tr><td><code>POST</code></td><td><code>{$base}/v1/chunks</code> &mdash; auth required</td></tr>
+          <tr><td><code>POST</code></td><td><code>{$base}/v1/chunks</code></td></tr>
           <tr><td><code>GET</code></td><td><code>{$base}/v1/chunks/{id}</code></td></tr>
           <tr><td><code>DELETE</code></td><td><code>{$base}/v1/chunks/{id}</code> &mdash; auth required</td></tr>
         </table>
+        {$auth}
         <p>See <code>README.md</code> for the full contract.</p>
-        HTML;
+        HTML);
     }
 
     protected function handleInfo(): void
@@ -124,12 +128,15 @@ class Router
             'defaultTtl' => $this->config->defaultTtl,
             'maxTtl' => $this->config->maxTtl,
             'rangeSupported' => true,
+            // Saves a client discovering the answer by eating a 401. It never
+            // means "drop the key": a key is still what authorises DELETE.
+            'uploadRequiresAuth' => !$this->config->openUpload,
         ]);
     }
 
     protected function handleUpload(): void
     {
-        $keyId = $this->requireKey();
+        $keyId = $this->uploaderKeyId();
         if ($keyId === null) {
             return;
         }
@@ -216,6 +223,8 @@ class Router
 
         // Only the uploader may drop a chunk. Report a foreign chunk as absent
         // rather than forbidden, so a valid key cannot be used to probe for ids.
+        // Nobody can authenticate as "anonymous", so an open server's chunks are
+        // undeletable by design and lapse at their TTL instead.
         if ($meta === null || !hash_equals($meta->ownerKeyId, $keyId)) {
             $this->notFound();
 
@@ -238,6 +247,27 @@ class Router
 
     // -- helpers ------------------------------------------------------------
 
+    /**
+     * Who to charge and record this upload against, or null after a 401.
+     *
+     * A credential that was offered and rejected is a 401 even on an open
+     * server: downgrading a mistyped key to anonymous would hand the client a
+     * chunk it can never delete, and hide the typo for good.
+     */
+    protected function uploaderKeyId(): ?string
+    {
+        $keyId = Auth::identify($this->config);
+        if ($keyId !== null) {
+            return $keyId;
+        }
+
+        if ($this->config->openUpload && !Auth::hasCredential()) {
+            return Config::ANONYMOUS_KEY_ID;
+        }
+
+        return $this->requireKey();
+    }
+
     /** The caller's key id, or null after a 401 has already been sent. */
     protected function requireKey(): ?string
     {
@@ -257,30 +287,6 @@ class Router
         Response::error(404, 'not found');
     }
 
-    /** Path of the request relative to the app root, e.g. "/v1/chunks". */
-    protected function requestPath(): string
-    {
-        $uri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
-        $path = parse_url($uri, PHP_URL_PATH);
-        $path = is_string($path) ? rawurldecode($path) : '/';
-
-        $base = $this->scriptDir();
-        if ($base !== '' && str_starts_with($path, $base)) {
-            $path = mb_substr($path, mb_strlen($base));
-        }
-
-        return $path === '' ? '/' : $path;
-    }
-
-    /** Directory the front controller lives in, without a trailing slash. */
-    protected function scriptDir(): string
-    {
-        $script = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
-        $dir = str_replace('\\', '/', dirname($script));
-
-        return $dir === '/' || $dir === '.' ? '' : rtrim($dir, '/');
-    }
-
     /**
      * Absolute base URL clients should use.
      *
@@ -289,15 +295,7 @@ class Router
      */
     protected function publicBaseUrl(): string
     {
-        if ($this->config->publicBaseUrl !== null) {
-            return $this->config->publicBaseUrl;
-        }
-
-        $https = $_SERVER['HTTPS'] ?? '';
-        $scheme = ($https !== '' && mb_strtolower((string) $https) !== 'off') ? 'https' : 'http';
-        $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
-
-        return $scheme . '://' . $host . $this->scriptDir();
+        return $this->config->publicBaseUrl ?? Request::baseUrl();
     }
 
     protected function contentLength(): ?int

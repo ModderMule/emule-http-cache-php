@@ -25,7 +25,10 @@ if (PHP_SAPI !== 'cli') {
 require __DIR__ . '/bootstrap.php';
 
 try {
-    exit((new StorageTest())->execute());
+    exit(TestCase::runAll([
+        new StorageTest(),
+        new InstallTest(),
+    ]));
 } catch (\Throwable $e) {
     fwrite(STDERR, "\n" . $e->getMessage() . "\n");
     exit(2);

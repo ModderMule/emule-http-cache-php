@@ -27,6 +27,7 @@ class SmokeTest extends TestCase
     protected string $iv = '';
 
     protected int $maxChunkSize = 0;
+    protected bool $uploadRequiresAuth = true;
     protected string $chunkId = '';
     protected string $chunkUrl = '';
 
@@ -74,6 +75,10 @@ class SmokeTest extends TestCase
             'rangeSupported missing',
         );
 
+        // Absent means required: a backend written before the field existed is a
+        // closed one, and guessing the other way would skip a real assertion.
+        $this->uploadRequiresAuth = ($info['uploadRequiresAuth'] ?? true) !== false;
+
         $this->maxChunkSize = (int) ($info['maxChunkSize'] ?? 0);
         $this->assert(
             $this->maxChunkSize >= self::CIPHER_SIZE,
@@ -111,10 +116,19 @@ class SmokeTest extends TestCase
         ]);
         $this->check('POST with a wrong key is rejected', $response->status, 401);
 
-        $response = $this->http->post($this->baseUrl . '/v1/chunks', $this->cipher, [
+        // A few bytes rather than a whole part: on an open server this one is
+        // stored, and an anonymous chunk cannot be deleted afterwards.
+        $response = $this->http->post($this->baseUrl . '/v1/chunks', 'no-key-probe', [
             'Content-Type: application/octet-stream',
         ]);
-        $this->check('POST with no key is rejected', $response->status, 401);
+
+        if ($this->uploadRequiresAuth) {
+            $this->check('POST with no key is rejected', $response->status, 401);
+        } else {
+            // The wrong key above must still be a 401 even here: only an absent
+            // credential falls through to anonymous.
+            $this->check('POST with no key is accepted on an open server', $response->status, 201);
+        }
 
         // Chunked transfer omits Content-Length, which the contract requires.
         $response = $this->http->post($this->baseUrl . '/v1/chunks', $this->cipher, [

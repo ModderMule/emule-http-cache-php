@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace EMule\HttpCache;
 
+use EMule\HttpCache\Http\Request;
 use EMule\HttpCache\Http\Response;
 use EMule\HttpCache\Http\Router;
+use EMule\HttpCache\Install\InstallController;
+use EMule\HttpCache\Install\Installer;
 
 /**
  * eMule HTTP Cache — front controller.
@@ -29,8 +32,16 @@ while (ob_get_level() > 0) {
 }
 
 try {
-    $config = Config::load(__DIR__);
-    (new Router($config))->dispatch();
+    $installer = new Installer(__DIR__);
+
+    // Nothing gets served until this server has a config.php of its own.
+    // Config::load() would otherwise fall back to config.example.php and run
+    // the whole API on the key that is published in the repository.
+    if (!$installer->isInstalled()) {
+        (new InstallController($installer))->handle(Request::method(), Request::path());
+    } else {
+        (new Router(Config::load(__DIR__)))->dispatch();
+    }
 } catch (\Throwable $e) {
     error_log('emule-http-cache: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 

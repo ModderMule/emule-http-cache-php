@@ -7,8 +7,14 @@ namespace EMule\HttpCache;
 /**
  * eMule HTTP Cache — configuration.
  *
- * Copy to config.php and edit. config.php wins when both exist; without it the
- * server falls back to this file, so a fresh checkout still runs.
+ * Copy to config.php and edit, or open /install in a browser and let the
+ * installer write it for you. config.php wins when both exist; without it the
+ * server falls back to this file for CLI tools, but refuses to serve HTTP.
+ *
+ * The installer builds config.php out of this file, so these comments survive
+ * into your real config. It rewrites the values by key name and replaces the
+ * sample key id and the sample secret in the apiKeys block below. Rename either
+ * of those and tests/InstallTest.php is what tells you.
  */
 
 return [
@@ -23,8 +29,30 @@ return [
         'local-test' => [
             'secret' => 'dev-only-change-me-0123456789abcdef',
             'quotaBytesPerDay' => 0,
+
+            // false revokes this uploader without deleting the entry, so you
+            // can put it back later and still know whose it was. A revoked key
+            // loses DELETE too — it stops being a credential entirely.
+            'enabled' => true,
         ],
+
+        // Add as many as you like. The id is yours to choose; it labels the
+        // chunk's owner and its counter in var/quota-<id>-<date>.txt, so keep
+        // it to [A-Za-z0-9._-]. "anonymous" is reserved and will be ignored.
+        //
+        // 'laptop'  => ['secret' => '…', 'quotaBytesPerDay' => 5_368_709_120],
+        // 'seedbox' => ['secret' => '…', 'enabled' => false],
     ],
+
+    // Accept uploads with no API key at all. Anonymous uploads are owned by the
+    // reserved key id "anonymous", which nobody can authenticate as — so they
+    // cannot be deleted through the API and only ever lapse at their TTL. A
+    // *wrong* key is still a 401 here; only an absent one falls through.
+    'openUpload' => false,
+
+    // Daily allowance for anonymous uploads, in bytes, when openUpload is on.
+    // 0 = unlimited, which on an open server means "please fill my disk".
+    'openUploadQuotaBytesPerDay' => 10_737_418_240,   // 10 GiB
 
     // Where ciphertext blobs and their metadata sidecars live. Relative paths
     // are resolved against this directory.

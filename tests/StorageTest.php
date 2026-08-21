@@ -30,6 +30,7 @@ class StorageTest extends TestCase
         try {
             $this->checkFreeSpaceFloor();
             $this->checkConfigFallbacks();
+            $this->checkKeyModel();
             $this->checkSweepSchedule();
         } finally {
             $this->removeTree($this->root);
@@ -77,6 +78,44 @@ class StorageTest extends TestCase
 
         $config = $this->config('negative-floor', ['minFreeBytes' => -5]);
         $this->check('a negative floor clamps to zero', $config->minFreeBytes, 0);
+    }
+
+    protected function checkKeyModel(): void
+    {
+        $this->section('Config key model');
+
+        $config = $this->config('key-defaults', [
+            'apiKeys' => ['plain' => ['secret' => 's']],
+        ]);
+        $this->assert($config->apiKeys['plain']->enabled, 'a key without an enabled flag is enabled');
+        $this->assert(!$config->openUpload, 'an absent openUpload is closed');
+        $this->check('an absent anonymous allowance is zero', $config->openUploadQuotaBytesPerDay, 0);
+
+        $config = $this->config('key-disabled', [
+            'apiKeys' => ['off' => ['secret' => 's', 'enabled' => false]],
+        ]);
+        $this->assert(!$config->apiKeys['off']->enabled, 'enabled => false survives the load');
+
+        // A key by this name could delete every chunk an open server took
+        // without a credential, so it must never load.
+        $config = $this->config('key-reserved', [
+            'apiKeys' => [
+                'anonymous' => ['secret' => 'sneaky'],
+                'real' => ['secret' => 'fine'],
+            ],
+        ]);
+        $this->check('a key named "anonymous" is dropped', implode(',', array_keys($config->apiKeys)), 'real');
+
+        $config = $this->config('anon-quota', [
+            'openUpload' => true,
+            'openUploadQuotaBytesPerDay' => 4096,
+        ]);
+        $this->check(
+            'quotaFor("anonymous") reads the open allowance',
+            $config->quotaFor(Config::ANONYMOUS_KEY_ID),
+            4096,
+        );
+        $this->check('quotaFor() on an unknown key is unlimited', $config->quotaFor('nobody'), 0);
     }
 
     protected function checkSweepSchedule(): void
@@ -133,7 +172,9 @@ class StorageTest extends TestCase
             }
         }
 
-        $body = "<?php\n\nreturn [\n    'apiKeys' => ['t' => ['secret' => 'test-secret']],\n";
+        $overrides += ['apiKeys' => ['t' => ['secret' => 'test-secret']]];
+
+        $body = "<?php\n\nreturn [\n";
         foreach ($overrides as $key => $value) {
             $body .= sprintf("    %s => %s,\n", var_export($key, true), var_export($value, true));
         }
@@ -168,41 +209,5 @@ class StorageTest extends TestCase
         ], JSON_THROW_ON_ERROR));
 
         return $id;
-    }
-
-    protected function makeTempDir(): string
-    {
-        $path = sys_get_temp_dir() . '/emule-http-cache-test-' . bin2hex(random_bytes(8));
-
-        if (!@mkdir($path, 0o777, true) && !is_dir($path)) {
-            throw new \RuntimeException('could not create a temp directory at ' . $path);
-        }
-
-        return $path;
-    }
-
-    /** Recursive rmdir, scoped to the temp tree this suite created. */
-    protected function removeTree(string $path): void
-    {
-        if ($path === '' || !is_dir($path)) {
-            return;
-        }
-
-        foreach (scandir($path) ?: [] as $entry) {
-            if ($entry === '.' || $entry === '..') {
-                continue;
-            }
-
-            $child = $path . '/' . $entry;
-            if (is_dir($child)) {
-                $this->removeTree($child);
-
-                continue;
-            }
-
-            @unlink($child);
-        }
-
-        @rmdir($path);
     }
 }

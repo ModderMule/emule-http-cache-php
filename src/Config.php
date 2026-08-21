@@ -15,12 +15,24 @@ use EMule\HttpCache\Security\ApiKey;
  */
 class Config
 {
+    /**
+     * Owner recorded for an upload that arrived without a credential, which is
+     * only possible when openUpload is on.
+     *
+     * Reserved: no configured key may claim it, so nobody can ever authenticate
+     * as the owner of an anonymous chunk and delete it.
+     */
+    public const ANONYMOUS_KEY_ID = 'anonymous';
+
     /** @param array<string, ApiKey> $apiKeys keyed by key id */
     protected function __construct(
         public readonly string $baseDir,
         public readonly string $storageDir,
         public readonly string $varDir,
         public readonly array $apiKeys,
+        /** Accept uploads with no credential at all, owned by ANONYMOUS_KEY_ID. */
+        public readonly bool $openUpload,
+        public readonly int $openUploadQuotaBytesPerDay,
         public readonly int $maxChunkSize,
         /** Free-space floor on the storage volume; 0 disables the check. */
         public readonly int $minFreeBytes,
@@ -45,6 +57,12 @@ class Config
 
         $keys = [];
         foreach ((array) ($raw['apiKeys'] ?? []) as $keyId => $spec) {
+            // A key called "anonymous" would be able to delete every chunk an
+            // open server accepted without a credential. Never load one.
+            if ((string) $keyId === self::ANONYMOUS_KEY_ID) {
+                continue;
+            }
+
             if (is_string($spec)) {
                 $spec = ['secret' => $spec];
             }
@@ -52,7 +70,12 @@ class Config
             if ($secret === '') {
                 continue;
             }
-            $keys[(string) $keyId] = new ApiKey($secret, (int) ($spec['quotaBytesPerDay'] ?? 0));
+            $keys[(string) $keyId] = new ApiKey(
+                $secret,
+                (int) ($spec['quotaBytesPerDay'] ?? 0),
+                // A config predating this key means enabled, not disabled.
+                (bool) ($spec['enabled'] ?? true),
+            );
         }
 
         $publicBaseUrl = $raw['publicBaseUrl'] ?? null;
@@ -70,6 +93,9 @@ class Config
             storageDir: $storageDir,
             varDir: $varDir,
             apiKeys: $keys,
+            // Absent means closed. Opening a server is always an explicit act.
+            openUpload: (bool) ($raw['openUpload'] ?? false),
+            openUploadQuotaBytesPerDay: max(0, (int) ($raw['openUploadQuotaBytesPerDay'] ?? 0)),
             maxChunkSize: (int) ($raw['maxChunkSize'] ?? 10_485_760),
             // A config predating this key means no floor, not a floor of zero bytes.
             minFreeBytes: max(0, (int) ($raw['minFreeBytes'] ?? 0)),
@@ -92,6 +118,10 @@ class Config
 
     public function quotaFor(string $keyId): int
     {
+        if ($keyId === self::ANONYMOUS_KEY_ID) {
+            return $this->openUploadQuotaBytesPerDay;
+        }
+
         return ($this->apiKeys[$keyId] ?? null)?->quotaBytesPerDay ?? 0;
     }
 

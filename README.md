@@ -17,8 +17,32 @@ The contract is plain HTTP + JSON, so a Go, Rust or S3-presigned backend is a dr
 - PHP 8.1+, no Composer
 - `ext-curl` and `ext-openssl` for tests
 - `storage/` and `var/` web-writable
+- the app root web-writable for the one `/install` request, or install by hand
 
 ## Install
+
+Upload the files, then open **`http://your-host/emule-http-cache-php/install`**.
+
+That page asks for the few settings worth deciding up front — who may upload, daily limits, how long
+a chunk lives — writes `config.php`, and then shows you an API key **once**, next to a clickable
+`ed2k://` link that configures eMuleQt in one click.
+
+Nothing is written to disk until you submit that form. The key is not shown again: copy it before you
+close the tab, and if you lose it, it is still in `config.php` on the server.
+
+The app root has to be writable by the web server for that one request. When it is not, the page says
+so and prints the exact `chmod` — tighten it again afterwards, since the installer never writes there
+twice.
+
+> **Whoever opens `/install` first gets the key.** A brand-new server has no secret to tell you apart
+> from anyone else with the URL, so there is no fixing that in software. Install it as soon as you
+> upload it. If you think someone beat you to it, delete `config.php` and do it again.
+
+Until it has been installed, every route answers `503`. The server will *not* fall back to the key in
+`config.example.php` — that one is printed in this repository and is therefore not a secret.
+
+Prefer a shell? The old way still works, and a `config.php` you wrote yourself is never read back to
+anyone by `/install`:
 
 ```sh
 cd /path/to/emule-http-cache-php
@@ -32,7 +56,8 @@ php tests/smoke.php
 
 Apache needs unmatched requests routed to `index.php`; for nginx use `docs/nginx.conf.sample`.
 
-Point eMuleQt at it:
+Point eMuleQt at it. The install page's `ed2k://` link does exactly this in one click — the format is
+specified in [`docs/ed2k-httpcache-link.md`](docs/ed2k-httpcache-link.md):
 
 ```yaml
 httpCache:
@@ -48,6 +73,9 @@ httpCache:
 Base URL is whatever directory the app is deployed into. All error bodies are
 `{"error": "<message>", "status": <code>}`.
 
+`/install` is not part of this. It is the PHP server's own setup page; a backend written in something
+else reimplements `/v1/*` and nothing more.
+
 ### `GET /v1/info`
 
 No auth. Lets a client discover limits before it wastes an upload.
@@ -60,12 +88,17 @@ No auth. Lets a client discover limits before it wastes an upload.
   "maxChunkSize": 10485760,
   "defaultTtl": 172800,
   "maxTtl": 604800,
-  "rangeSupported": true
+  "rangeSupported": true,
+  "uploadRequiresAuth": true
 }
 ```
 
 `service` and `version` are the handshake: a client that does not see
 `"service":"emule-http-cache"` must refuse to use the endpoint.
+
+`uploadRequiresAuth` is `false` on a server that takes uploads without a credential. It is never a
+reason for a client to drop the key it has — a key is still what authorises `DELETE`, and the
+operator may close the server again tomorrow.
 
 ### `POST /v1/chunks`
 
@@ -73,7 +106,7 @@ Stores one encrypted chunk.
 
 | | |
 |---|---|
-| `Authorization` | `Bearer <apiKey>` — `X-Api-Key: <apiKey>` also accepted |
+| `Authorization` | `Bearer <apiKey>` — `X-Api-Key: <apiKey>` also accepted. Optional when the server has `openUpload` on |
 | `Content-Type` | `application/octet-stream` |
 | `Content-Length` | **required** — chunked uploads are rejected with `411` |
 | `X-Chunk-TTL` | optional, seconds; clamped to `maxTtl` |
@@ -94,7 +127,8 @@ Stores one encrypted chunk.
 `url` is absolute and is the only field a client may fetch from — never rebuild it from `id`, since
 a backend may serve blobs from another host or a signed CDN URL. `Location` carries the same value.
 
-Errors: `400` empty body or length mismatch · `401` bad/missing key · `411` no `Content-Length` ·
+Errors: `400` empty body or length mismatch · `401` bad key, or a missing one on a server that
+requires it · `411` no `Content-Length` ·
 `413` over `maxChunkSize` · `429` daily quota exhausted · `507` storage failure — both a failed
 write and free space that would drop below `minFreeBytes`.
 
@@ -127,6 +161,42 @@ or the network's fault as the blob's, so entries lapse at their TTL instead. It 
 cleanup — quota pressure, an operator purge, a client shutting down for good.
 
 ---
+
+## API keys
+
+`config.php` holds as many as you like, each with its own daily allowance:
+
+```php
+'apiKeys' => [
+    'laptop'  => ['secret' => '…', 'quotaBytesPerDay' => 5_368_709_120],
+    'seedbox' => ['secret' => '…', 'quotaBytesPerDay' => 0],
+    'old-box' => ['secret' => '…', 'enabled' => false],
+],
+```
+
+The id labels the chunk's owner and its counter in `var/`, so keep it to `[A-Za-z0-9._-]`.
+
+`'enabled' => false` revokes one uploader without deleting the entry: every client and every
+`ed2k://` link carrying that secret stops working at once, `DELETE` included, and you still know
+whose it was. Deleting the entry does the same and loses the record.
+
+The installer writes `config.php` mode `0644` so the CLI tools can still read it when the web server
+owns the file. On a shared host where that is too generous, `chmod 600 config.php` — as long as
+`bin/gc.php` and the test suites run as the same user as the web server.
+
+### Letting anyone upload
+
+`'openUpload' => true` accepts `POST /v1/chunks` with no credential at all; the install form's
+"anyone can upload" checkbox sets it. Two consequences, neither obvious:
+
+- An anonymous upload is owned by the reserved key id `anonymous`, which nobody can authenticate as.
+  Those chunks **cannot be deleted through the API** and only lapse at their TTL. A key named
+  `anonymous` in `config.php` is ignored on load, precisely so that ability cannot be handed out.
+- A *wrong* key is still a `401`. Only an absent one falls through to anonymous, so a client with a
+  mistyped secret finds out, instead of quietly uploading chunks it can never delete.
+
+Set `openUploadQuotaBytesPerDay` — the entire internet shares that one counter — and set
+`minFreeBytes` as well. Clients can tell the difference from `uploadRequiresAuth` in `/v1/info`.
 
 ## Why the download URL has no auth
 
@@ -209,10 +279,12 @@ php tests/smoke.php [baseUrl] [apiKey]
 Defaults to `http://localhost/emule-http-cache-php` and the first key in `config.php`. Exit code is
 0 when everything passed, 1 on a failed assertion, 2 when the suite could not run at all.
 
-31 assertions covering the whole contract: `/v1/info` shape, the three auth rejections, a real
+31 assertions covering the whole contract: `/v1/info` shape, the auth rejections, a real
 9,728,000-byte part encrypted with AES-256-CBC, upload, byte-exact download, decryption back to the
 original, four range forms plus `416`, `HEAD`, owner-only delete, and the `404`/`413`/`405` paths.
-It speaks nothing but HTTP, so it is equally valid against a non-PHP backend.
+It speaks nothing but HTTP, so it is equally valid against a non-PHP backend. It reads
+`uploadRequiresAuth` from `/v1/info` and asserts the behaviour that server actually promises, so an
+open server passes the same 31.
 
 No Apache handy? The built-in server is enough for a full run:
 
@@ -229,3 +301,7 @@ The `post_max_size` override is not optional. Passing `index.php` as the router 
 ```sh
 php tests/unit.php
 ```
+
+The free-space floor, the config fallbacks, the sweep schedule, the installer, and the `ed2k://` link
+format — everything a portable HTTP suite has no way to reach. It builds throwaway app directories
+under the system temp dir, so it has to run on the same machine as the code.

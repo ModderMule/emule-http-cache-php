@@ -1,0 +1,76 @@
+<?php
+
+declare(strict_types=1);
+
+namespace EMule\HttpCache\Http;
+
+/**
+ * The shell every HTML page in the app shares.
+ *
+ * There are six of them now — the status page and the five install states — and
+ * they differ only in their body, so the doctype, stylesheet and heading live
+ * here once.
+ */
+class HtmlPage
+{
+    /**
+     * Status line and headers, without a body. The HEAD path, and what send()
+     * calls on its way in.
+     *
+     * $sensitive marks a page that has a credential on it: keep it out of caches,
+     * out of indexes, and out of the next site's Referer header.
+     */
+    public static function headers(int $status, bool $sensitive = false): void
+    {
+        Response::status($status);
+        header('Content-Type: text/html; charset=utf-8');
+        header('Cache-Control: no-store');
+
+        if ($sensitive) {
+            header('Referrer-Policy: no-referrer');
+            header('X-Robots-Tag: noindex, nofollow');
+        }
+    }
+
+    public static function send(int $status, string $title, string $body, bool $sensitive = false): void
+    {
+        self::headers($status, $sensitive);
+
+        $safeTitle = self::escape($title);
+
+        echo <<<HTML
+        <!doctype html>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>{$safeTitle} — eMule HTTP Cache</title>
+        <style>
+          body{font:14px/1.6 -apple-system,system-ui,sans-serif;max-width:46rem;margin:3rem auto;padding:0 1rem;color:#18181b}
+          code{background:#f4f4f5;padding:.1rem .35rem;border-radius:3px;word-break:break-all}
+          pre{background:#f4f4f5;padding:.75rem 1rem;border-radius:5px;overflow-x:auto}
+          pre code{background:none;padding:0}
+          td{padding:.15rem .75rem .15rem 0;vertical-align:top}
+          a{color:#1d4ed8}
+          h2{font-size:1.05rem;margin:2rem 0 .5rem}
+          label{display:block;margin:.9rem 0}
+          label>span{display:block;font-weight:600;margin-bottom:.15rem}
+          label small{display:block;font-weight:400;color:#52525b}
+          input[type=text],input[type=number],input[type=url]{width:100%;box-sizing:border-box;padding:.4rem .5rem;border:1px solid #d4d4d8;border-radius:4px;font:inherit}
+          .check{display:flex;gap:.6rem;align-items:flex-start;margin:.9rem 0}
+          .check input{margin-top:.35rem}
+          button{font:inherit;font-weight:600;padding:.5rem 1.1rem;border:0;border-radius:4px;background:#1d4ed8;color:#fff;cursor:pointer}
+          .box{border:1px solid #d4d4d8;border-radius:5px;padding:.85rem 1rem;margin:1rem 0;background:#fafafa}
+          .warn{border-color:#f59e0b;background:#fffbeb}
+          .bad{border-color:#dc2626;background:#fef2f2}
+          .key{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;word-break:break-all}
+          .muted{color:#52525b}
+        </style>
+        <h1>eMule HTTP Cache</h1>
+        {$body}
+        HTML;
+    }
+
+    public static function escape(string $text): string
+    {
+        return htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+    }
+}

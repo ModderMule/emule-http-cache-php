@@ -28,11 +28,31 @@ abstract class TestCase
     /** Run the suite, print the tally, return the process exit code. */
     public function execute(): int
     {
-        $this->run();
+        return self::runAll([$this]);
+    }
 
-        printf("\n%d passed, %d failed\n\n", $this->passed, $this->failed);
+    /**
+     * Run several suites and print one tally for the lot.
+     *
+     * unit.php has more than one suite to run and a reader wants one number at
+     * the end, not one per class.
+     *
+     * @param list<self> $suites
+     */
+    public static function runAll(array $suites): int
+    {
+        $passed = 0;
+        $failed = 0;
 
-        return $this->failed === 0 ? 0 : 1;
+        foreach ($suites as $suite) {
+            $suite->run();
+            $passed += $suite->passed;
+            $failed += $suite->failed;
+        }
+
+        printf("\n%d passed, %d failed\n\n", $passed, $failed);
+
+        return $failed === 0 ? 0 : 1;
     }
 
     /** Raise memory_limit to at least $bytes. Never lowers a higher limit. */
@@ -74,6 +94,12 @@ abstract class TestCase
         $this->bad(sprintf("%s (expected '%s', got '%s')", $label, $expected, $actual));
     }
 
+    /** Neither a pass nor a fail: something this machine cannot exercise. */
+    protected function skip(string $label, string $why): void
+    {
+        printf("  %s %s (%s)\n", $this->paint('skip', '33'), $label, $why);
+    }
+
     protected function assert(bool $passed, string $label, string $detail = ''): void
     {
         if ($passed) {
@@ -83,6 +109,47 @@ abstract class TestCase
         }
 
         $this->bad($detail === '' ? $label : $label . ' (' . $detail . ')');
+    }
+
+    /** A fresh directory under the system temp dir, for a suite to scribble in. */
+    protected function makeTempDir(): string
+    {
+        $path = sys_get_temp_dir() . '/emule-http-cache-test-' . bin2hex(random_bytes(8));
+
+        if (!@mkdir($path, 0o777, true) && !is_dir($path)) {
+            throw new \RuntimeException('could not create a temp directory at ' . $path);
+        }
+
+        return $path;
+    }
+
+    /** Recursive rmdir, scoped to the temp tree a suite created. */
+    protected function removeTree(string $path): void
+    {
+        if ($path === '' || !is_dir($path)) {
+            return;
+        }
+
+        // A test that made a directory unwritable still has to be able to clean
+        // up after itself.
+        @chmod($path, 0o777);
+
+        foreach (scandir($path) ?: [] as $entry) {
+            if ($entry === '.' || $entry === '..') {
+                continue;
+            }
+
+            $child = $path . '/' . $entry;
+            if (is_dir($child)) {
+                $this->removeTree($child);
+
+                continue;
+            }
+
+            @unlink($child);
+        }
+
+        @rmdir($path);
     }
 
     protected function paint(string $text, string $code): string
