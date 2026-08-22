@@ -9,7 +9,7 @@ namespace EMule\HttpCache\Http;
  *
  * There are six of them now — the status page and the five install states — and
  * they differ only in their body, so the doctype, stylesheet and heading live
- * here once.
+ * once in src/Html/page.php, with the six bodies as templates beside it.
  */
 class HtmlPage
 {
@@ -32,41 +32,45 @@ class HtmlPage
         }
     }
 
-    public static function send(int $status, string $title, string $body, bool $sensitive = false): void
-    {
+    /**
+     * The shell, then the body template straight after it.
+     *
+     * The shell closes no tags, so nothing has to follow the body and neither
+     * template is ever held in memory as a string.
+     *
+     * @param array<string, string> $vars locals for the body template
+     */
+    public static function send(
+        int $status,
+        string $title,
+        string $template,
+        array $vars = [],
+        bool $sensitive = false,
+    ): void {
         self::headers($status, $sensitive);
 
-        $safeTitle = self::escape($title);
+        self::render('page', ['safeTitle' => self::escape($title)]);
+        self::render($template, $vars);
+    }
 
-        echo <<<HTML
-        <!doctype html>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>{$safeTitle} — eMule HTTP Cache</title>
-        <style>
-          body{font:14px/1.6 -apple-system,system-ui,sans-serif;max-width:46rem;margin:3rem auto;padding:0 1rem;color:#18181b}
-          code{background:#f4f4f5;padding:.1rem .35rem;border-radius:3px;word-break:break-all}
-          pre{background:#f4f4f5;padding:.75rem 1rem;border-radius:5px;overflow-x:auto}
-          pre code{background:none;padding:0}
-          td{padding:.15rem .75rem .15rem 0;vertical-align:top}
-          a{color:#1d4ed8}
-          h2{font-size:1.05rem;margin:2rem 0 .5rem}
-          label{display:block;margin:.9rem 0}
-          label>span{display:block;font-weight:600;margin-bottom:.15rem}
-          label small{display:block;font-weight:400;color:#52525b}
-          input[type=text],input[type=number],input[type=url]{width:100%;box-sizing:border-box;padding:.4rem .5rem;border:1px solid #d4d4d8;border-radius:4px;font:inherit}
-          .check{display:flex;gap:.6rem;align-items:flex-start;margin:.9rem 0}
-          .check input{margin-top:.35rem}
-          button{font:inherit;font-weight:600;padding:.5rem 1.1rem;border:0;border-radius:4px;background:#1d4ed8;color:#fff;cursor:pointer}
-          .box{border:1px solid #d4d4d8;border-radius:5px;padding:.85rem 1rem;margin:1rem 0;background:#fafafa}
-          .warn{border-color:#f59e0b;background:#fffbeb}
-          .bad{border-color:#dc2626;background:#fef2f2}
-          .key{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:600;word-break:break-all}
-          .muted{color:#52525b}
-        </style>
-        <h1>eMule HTTP Cache</h1>
-        {$body}
-        HTML;
+    /**
+     * Echo one of the templates in src/Html with $vars as its locals.
+     *
+     * They are plain HTML with <?= ?> holes rather than heredocs, so an editor
+     * sees markup instead of one long string. Values arrive ready to print: a
+     * $safe* name has been through escape(), anything else is trusted markup
+     * this code built itself.
+     *
+     * @param array<string, string> $vars
+     */
+    protected static function render(string $template, array $vars = []): void
+    {
+        // The closure is what keeps the caller's locals out of the template.
+        (static function (string $__template, array $__vars): void {
+            extract($__vars, EXTR_SKIP);
+
+            require $__template;
+        })(__DIR__ . '/../Html/' . $template . '.php', $vars);
     }
 
     public static function escape(string $text): string

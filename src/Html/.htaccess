@@ -1,0 +1,9 @@
+# Page templates, included by HtmlPage::render(). Unlike the class files beside
+# them these emit markup when hit directly, so they are never web-reachable.
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order deny,allow
+    Deny from all
+</IfModule>

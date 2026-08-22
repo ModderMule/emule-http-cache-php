@@ -6,8 +6,8 @@
 # boilerplate carries the reason for it on the line above.
 #
 # nginx does not read .htaccess, so the protection that storage/,
-# var/ and tests/ get from their own .htaccess files under Apache has
-# to be restated here.
+# var/, tests/ and src/Html/ get from their own .htaccess files under
+# Apache has to be restated here.
 ########################################################################
 
 server {
@@ -53,9 +53,12 @@ server {
         fastcgi_buffering off;
     }
 
-    # Ciphertext, sidecars, quota counters and the CLI tools are never
-    # web-reachable. This is the .htaccess replacement.
-    location ~ ^/(storage|var|tests|bin)/ {
+    # Ciphertext, sidecars, quota counters, the CLI tools and the page
+    # templates are never web-reachable. This is the .htaccess
+    # replacement. src/Html/ is listed because those files emit markup
+    # when requested directly; the rest of src/ holds class files, which
+    # emit nothing.
+    location ~ ^/(storage|var|tests|bin|src/Html)/ {
         return 404;
     }
 
@@ -125,6 +128,6 @@ server {
 #       client_max_body_size 12m;
 #   }
 #
-#   location ~ ^/emule-http-cache-php/(storage|var|tests|bin)/ {
+#   location ~ ^/emule-http-cache-php/(storage|var|tests|bin|src/Html)/ {
 #       return 404;
 #   }

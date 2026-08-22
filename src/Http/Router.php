@@ -99,23 +99,12 @@ class Router
             return;
         }
 
-        $base = HtmlPage::escape($this->publicBaseUrl());
+        $safeBase = HtmlPage::escape($this->publicBaseUrl());
         $auth = $this->config->openUpload
             ? '<p>Uploads are open: no API key is needed to store a chunk here.</p>'
             : '';
 
-        HtmlPage::send(200, 'Status', <<<HTML
-        <p>Encrypted chunk cache for eMuleQt. This server stores AES-256-CBC ciphertext
-        and never receives a key, a file hash or a part number.</p>
-        <table>
-          <tr><td><code>GET</code></td><td><a href="{$base}/v1/info">{$base}/v1/info</a></td></tr>
-          <tr><td><code>POST</code></td><td><code>{$base}/v1/chunks</code></td></tr>
-          <tr><td><code>GET</code></td><td><code>{$base}/v1/chunks/{id}</code></td></tr>
-          <tr><td><code>DELETE</code></td><td><code>{$base}/v1/chunks/{id}</code> &mdash; auth required</td></tr>
-        </table>
-        {$auth}
-        <p>See <code>README.md</code> for the full contract.</p>
-        HTML);
+        HtmlPage::send(200, 'Status', 'status', ['safeBase' => $safeBase, 'auth' => $auth]);
     }
 
     protected function handleInfo(): void

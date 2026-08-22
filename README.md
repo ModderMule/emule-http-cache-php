@@ -66,6 +66,11 @@ httpCache:
   apiKey: "<the secret from config.php>"
 ```
 
+Behind Cloudflare or any WAF, the admin may have to allow `eMule*` user agents. Every request eMuleQt
+makes — the `/v1/info` probe, the upload, and the chunk download — is `User-Agent: eMuleQt/<version>`,
+so one `eMule*` rule covers the client completely; what default bot rules are quick to challenge is an
+agent they do not recognise ([User Agent Blocking](https://developers.cloudflare.com/waf/tools/user-agent-blocking/)).
+
 ---
 
 ## The contract
