@@ -1,4 +1,4 @@
-# eMule HTTP Cache — reference server
+# eMule HTTP Cache
 
 A tiny, dependency-free chunk cache for eMuleQt's **HTTP Cache** feature.
 
