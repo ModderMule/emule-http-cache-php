@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EMule\HttpCache\Tests;
 
 use EMule\HttpCache\Config;
+use EMule\HttpCache\Install\InstallPage;
 use EMule\HttpCache\Install\InstallSettings;
 use EMule\HttpCache\Install\Installer;
 use EMule\HttpCache\Security\Ed2kConfigLink;
@@ -36,6 +37,7 @@ class InstallTest extends TestCase
             $this->checkFormValidation();
             $this->checkLinkRoundTrip();
             $this->checkLinkRejections();
+            $this->checkInstalledPage();
         } finally {
             $this->removeTree($this->root);
         }
@@ -307,6 +309,74 @@ class InstallTest extends TestCase
 
         $long = 'ed2k://|httpcache|' . str_repeat('a', 5000) . '|https://h|s|/';
         $this->assert(Ed2kConfigLink::parse($long) === null, 'an absurdly long link is refused');
+    }
+
+    /**
+     * The page that hands the link over.
+     *
+     * Copying is the only handover there is: eMuleQt's clipboard watcher matches
+     * on the ed2k://|httpcache| prefix, and a Chromium since version 130 cannot
+     * parse an ed2k:// URL at all — "|" is a forbidden host code point — so an
+     * anchor there hands over nothing and takes the tab to about:blank#blocked.
+     *
+     * What the page shows must therefore be the canonical link, separators and
+     * all. htmlspecialchars() leaves "|" alone, so the copied text survives; a
+     * rendering that escaped the separators would look perfectly fine while
+     * handing out a link no parser accepts, because a conforming one splits on
+     * literal "|" before it decodes anything.
+     */
+    protected function checkInstalledPage(): void
+    {
+        $this->section('The installed page');
+
+        $secret = str_repeat('a1b2c3d4', 6);
+
+        // The suite has already printed, so the page's headers cannot go out and
+        // PHP says so four times over. Only the body is under test — anything
+        // else the render complains about still surfaces.
+        set_error_handler(static function (int $severity, string $message): bool {
+            return str_contains($message, 'headers already sent')
+                || str_contains($message, 'Cannot set response code');
+        });
+
+        ob_start();
+
+        try {
+            InstallPage::installed('http://192.168.1.10/emule-http-cache-php', 'default', $secret, false, true);
+        } finally {
+            $html = (string) ob_get_clean();
+            restore_error_handler();
+        }
+
+        $this->assert(str_contains($html, 'id="copyLink"'), 'the page offers a copy control');
+
+        if (preg_match('#<code id="ed2kLink">(.*?)</code>#s', $html, $m) !== 1) {
+            $this->assert(false, 'the page shows a copyable ed2k link');
+
+            return;
+        }
+
+        // What the browser hands the copy script is textContent, not markup.
+        $copied = html_entity_decode($m[1], ENT_QUOTES, 'UTF-8');
+        $redacted = Ed2kConfigLink::redact($copied);
+
+        $this->assert(
+            str_starts_with($copied, 'ed2k://|httpcache|'),
+            'the copied text carries the prefix the clipboard watcher matches on',
+            $redacted,
+        );
+        $this->assert(
+            !str_contains(mb_strtolower($copied), '%7c') && substr_count($copied, '|') === 6,
+            'the copied link keeps its separators literal',
+            $redacted,
+        );
+
+        $link = Ed2kConfigLink::parse($copied);
+        $this->assert($link?->keyId === 'default', 'the copied link parses back', $redacted);
+        $this->assert($link?->secret === $secret, 'the copied link carries the key that was just shown');
+
+        // An anchor is inert in Chromium, so the page must not grow one back.
+        $this->assert(!str_contains($html, 'href="ed2k'), 'the page has no ed2k:// anchor');
     }
 
     // -- fixtures ---------------------------------------------------------------

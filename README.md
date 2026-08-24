@@ -24,8 +24,9 @@ The contract is plain HTTP + JSON, so a Go, Rust or S3-presigned backend is a dr
 Upload the files, then open **`http://your-host/emule-http-cache-php/install`**.
 
 That page asks for the few settings worth deciding up front — who may upload, daily limits, how long
-a chunk lives — writes `config.php`, and then shows you an API key **once**, next to a clickable
-`ed2k://` link that configures eMuleQt in one click.
+a chunk lives — writes `config.php`, and then shows you an API key **once**, next to an
+`ed2k://` link that configures eMuleQt in one step: copy it, and eMuleQt's clipboard watcher offers
+to apply it.
 
 Nothing is written to disk until you submit that form. The key is not shown again: copy it before you
 close the tab, and if you lose it, it is still in `config.php` on the server.
@@ -56,7 +57,7 @@ php tests/smoke.php
 
 Apache needs unmatched requests routed to `index.php`; for nginx use `docs/nginx.conf.sample`.
 
-Point eMuleQt at it. The install page's `ed2k://` link does exactly this in one click — the format is
+Point eMuleQt at it. Copying the install page's `ed2k://` link does exactly this — the format is
 specified in [`docs/ed2k-httpcache-link.md`](docs/ed2k-httpcache-link.md):
 
 ```yaml

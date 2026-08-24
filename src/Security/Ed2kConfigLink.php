@@ -17,7 +17,7 @@ use EMule\HttpCache\Http\BaseUrl;
  * with one: docs/ed2k-httpcache-link.md.
  *
  * It lives beside ApiKey because that is what it is: a credential, in a form
- * that can be clicked.
+ * that can be pasted.
  *
  * The server never consumes a link — parse() exists so the spec has a reference
  * implementation and so the encoding rules can be round-tripped in a test.
@@ -121,6 +121,27 @@ class Ed2kConfigLink
         }
 
         return new self($name, $baseUrl, $secret, $keyId);
+    }
+
+    /**
+     * The link with its secret replaced by an ellipsis, so a failure message can
+     * name a link without handing out the credential.
+     *
+     * Works on a malformed link too, which is exactly when a message wants to
+     * quote one.
+     */
+    public static function redact(string $link): string
+    {
+        $fields = explode('|', $link);
+
+        // ed2k://, type, name, baseUrl, secret — the secret is the fifth field.
+        $secretField = 4;
+
+        if (count($fields) > $secretField) {
+            $fields[$secretField] = '…';
+        }
+
+        return implode('|', $fields);
     }
 
     // -- internals ------------------------------------------------------------
