@@ -45,4 +45,38 @@ class BaseUrl
 
         return rtrim($url, '/');
     }
+
+    /**
+     * Whether a base URL names the machine it is opened on: localhost, a name
+     * under .localhost, or a loopback address.
+     *
+     * Such a URL is fine in the operator's own browser and useless in a link
+     * meant for a client somewhere else.
+     */
+    public static function isLoopback(string $url): bool
+    {
+        $host = parse_url(trim($url), PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            return false;
+        }
+
+        $host = rtrim(mb_strtolower($host), '.');
+        if ($host === 'localhost' || str_ends_with($host, '.localhost')) {
+            return true;
+        }
+
+        // parse_url keeps the brackets of an IPv6 literal.
+        $address = trim($host, '[]');
+        if (str_starts_with($address, '::ffff:')) {
+            $address = substr($address, 7);
+        }
+
+        if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false) {
+            return str_starts_with($address, '127.');
+        }
+
+        $packed = filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false ? inet_pton($address) : false;
+
+        return $packed !== false && $packed === inet_pton('::1');
+    }
 }

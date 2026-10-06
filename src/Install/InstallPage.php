@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EMule\HttpCache\Install;
 
+use EMule\HttpCache\Http\BaseUrl;
 use EMule\HttpCache\Http\HtmlPage;
 use EMule\HttpCache\Http\Response;
 use EMule\HttpCache\Security\Ed2kConfigLink;
@@ -25,6 +26,16 @@ class InstallPage
         $summary = $errors === [] ? '' : '<p class="box bad">Nothing has been written. '
             . 'Fix the fields marked below and submit again.</p>';
 
+        // Opened by a name for this machine itself: a blank base URL field would
+        // put that name into the link, where another machine cannot use it.
+        $loopback = BaseUrl::isLoopback($detectedBaseUrl)
+            ? '<p class="box warn"><strong>You opened this page as <code>' . HtmlPage::escape($detectedBaseUrl)
+                . '</code>, which only works on this machine.</strong> Left blank, the public base URL below
+               takes that address, and the link on the next page will be useless to a client anywhere
+               else. Fill it in with the address other machines reach this server on, or reopen this
+               page by that address.</p>'
+            : '';
+
         $fields = self::text($values, $errors, 'keyId', 'Key id', 'Names this uploader in chunk metadata and in its quota counter. "anonymous" is reserved.')
             . self::checkbox($values, 'openUpload', 'Anyone can upload', 'Accept uploads with no API key at all. Convenient, and it means any stranger who finds the URL can spend your disk and your bandwidth. Anonymous chunks cannot be deleted through the API — they only lapse at their TTL.')
             . self::number($values, $errors, 'openUploadQuotaGb', 'Daily limit for anonymous uploads (GB)', 'Only applies when the box above is ticked. 0 means unlimited, which on an open server means "please fill my disk".')
@@ -36,7 +47,7 @@ class InstallPage
 
         HtmlPage::send(200, 'Install', 'install-form', [
             'safeAction' => $safeAction,
-            'summary' => $summary,
+            'summary' => $summary . $loopback,
             'fields' => $fields,
         ]);
     }
@@ -68,6 +79,13 @@ class InstallPage
                so this page may show the key again. Check that <code>var/</code> is writable by the
                web server.</p>';
 
+        $loopback = BaseUrl::isLoopback($baseUrl)
+            ? '<p class="box warn"><strong>This link only works on this machine.</strong> Its base URL is
+               <code>' . $safeBase . '</code>, which a client anywhere else cannot reach. Before copying
+               it, replace that part with the address other machines reach this server on, and set
+               <code>publicBaseUrl</code> in <code>config.php</code> to the same address.</p>'
+            : '';
+
         HtmlPage::send(200, 'Installed', 'installed', [
             'safeBase' => $safeBase,
             'safeKeyId' => $safeKeyId,
@@ -75,6 +93,7 @@ class InstallPage
             'safeLink' => $safeLink,
             'claim' => $claim,
             'open' => $open,
+            'loopback' => $loopback,
         ], sensitive: true);
     }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace EMule\HttpCache\Tests;
 
 use EMule\HttpCache\Config;
+use EMule\HttpCache\Http\BaseUrl;
 use EMule\HttpCache\Install\InstallPage;
 use EMule\HttpCache\Install\InstallSettings;
 use EMule\HttpCache\Install\Installer;
@@ -38,6 +39,7 @@ class InstallTest extends TestCase
             $this->checkLinkRoundTrip();
             $this->checkLinkRejections();
             $this->checkInstalledPage();
+            $this->checkLoopbackWarning();
         } finally {
             $this->removeTree($this->root);
         }
@@ -325,15 +327,62 @@ class InstallTest extends TestCase
      * handing out a link no parser accepts, because a conforming one splits on
      * literal "|" before it decodes anything.
      */
-    protected function checkInstalledPage(): void
+    protected function checkLoopbackWarning(): void
     {
-        $this->section('The installed page');
+        $this->section('A base URL that only works on this machine');
 
+        $vectors = [
+            'http://localhost' => true,
+            'http://LOCALHOST:8080/emule-http-cache-php' => true,
+            'http://localhost./x' => true,
+            'http://cache.localhost' => true,
+            'http://127.0.0.1/emule-http-cache-php' => true,
+            'http://127.8.9.10' => true,
+            'http://[::1]:8080' => true,
+            'http://[::ffff:127.0.0.1]' => true,
+            'http://cache.example.com' => false,
+            'http://192.168.1.10/emule-http-cache-php' => false,
+            'http://203.0.113.9' => false,
+            'http://[2001:db8::1]' => false,
+            'http://localhost.example.com' => false,
+            'http://notlocalhost' => false,
+            '' => false,
+        ];
+
+        foreach ($vectors as $url => $expected) {
+            $this->assert(
+                BaseUrl::isLoopback($url) === $expected,
+                sprintf('%s is %s', var_export($url, true), $expected ? 'loopback' : 'not loopback'),
+            );
+        }
+
+        $warning = 'This link only works on this machine.';
         $secret = str_repeat('a1b2c3d4', 6);
 
-        // The suite has already printed, so the page's headers cannot go out and
-        // PHP says so four times over. Only the body is under test — anything
-        // else the render complains about still surfaces.
+        $html = $this->render(static fn () => InstallPage::installed('http://localhost/emule-http-cache-php', 'default', $secret, false, true));
+        $this->assert(str_contains($html, $warning), 'the installed page warns about a localhost link');
+
+        $html = $this->render(static fn () => InstallPage::installed('http://192.168.1.10/emule-http-cache-php', 'default', $secret, false, true));
+        $this->assert(!str_contains($html, $warning), 'and says nothing about an address other machines can reach');
+
+        $formWarning = 'which only works on this machine';
+
+        $html = $this->render(static fn () => InstallPage::form('http://127.0.0.1', InstallSettings::formDefaults(), [], 'http://127.0.0.1'));
+        $this->assert(str_contains($html, $formWarning), 'the form warns before anything is written');
+
+        $html = $this->render(static fn () => InstallPage::form('http://cache.example.com', InstallSettings::formDefaults(), [], 'http://cache.example.com'));
+        $this->assert(!str_contains($html, $formWarning), 'and not when it was opened by a real address');
+    }
+
+    /**
+     * The body a page renders.
+     *
+     * The suite has already printed, so the page's headers cannot go out and
+     * PHP says so four times over. Only the body is under test — anything else
+     * the render complains about still surfaces.
+     */
+    protected function render(callable $page): string
+    {
         set_error_handler(static function (int $severity, string $message): bool {
             return str_contains($message, 'headers already sent')
                 || str_contains($message, 'Cannot set response code');
@@ -342,11 +391,22 @@ class InstallTest extends TestCase
         ob_start();
 
         try {
-            InstallPage::installed('http://192.168.1.10/emule-http-cache-php', 'default', $secret, false, true);
+            $page();
         } finally {
             $html = (string) ob_get_clean();
             restore_error_handler();
         }
+
+        return $html;
+    }
+
+    protected function checkInstalledPage(): void
+    {
+        $this->section('The installed page');
+
+        $secret = str_repeat('a1b2c3d4', 6);
+
+        $html = $this->render(static fn () => InstallPage::installed('http://192.168.1.10/emule-http-cache-php', 'default', $secret, false, true));
 
         $this->assert(str_contains($html, 'id="copyLink"'), 'the page offers a copy control');
 

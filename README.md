@@ -28,6 +28,10 @@ a chunk lives — writes `config.php`, and then shows you an API key **once**, n
 `ed2k://` link that configures eMuleQt in one step: copy it, and eMuleQt's clipboard watcher offers
 to apply it.
 
+Open it by the address clients will use, not `localhost`: the link carries the address in your
+browser unless you fill in the public base URL, and the page warns you when that address only works
+on the server itself.
+
 Nothing is written to disk until you submit that form. The key is not shown again: copy it before you
 close the tab, and if you lose it, it is still in `config.php` on the server.
 

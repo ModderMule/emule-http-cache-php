@@ -10,6 +10,7 @@ file either, delete it and reload <a href="<?= $safeBase ?>/install">/install</a
 </table>
 <?= $open ?>
 <h2>Configure eMuleQt</h2>
+<?= $loopback ?>
 <p><button type="button" class="copy" id="copyLink">Copy the link</button>
 <span class="muted" id="copyNote" hidden></span></p>
 <p><code id="ed2kLink"><?= $safeLink ?></code></p>
